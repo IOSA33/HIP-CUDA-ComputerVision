@@ -17,7 +17,43 @@ constexpr int g_Width { 3072 };
 constexpr int g_Height { 4096 };
 
 __global__ void DrawRectangle(unsigned long long sum_00, unsigned long long sum_10, unsigned long long sum_01) {
-    
+    unsigned long long x_coord { sum_10 / sum_00 };
+    unsigned long long y_coord { sum_01 / sum_00 };
+
+    int r { 1100 };
+    int d { 1350 };
+
+    for (int dx = -r; dx <= r; ++dx) {
+        int nx = x_coord + dx;
+
+        int ny1 = y_coord - d;
+        int ny2 = y_coord + d;
+
+        if (nx >= 0 && nx < width) {
+            if (ny1 >= 0 && ny1 < height) {
+                mask[ny1 * width + nx] = 255;
+            }
+            if (ny2 >= 0 && ny2 < height) {
+                mask[ny2 * W + nx] = 255;
+            }
+        }
+    }
+
+    for (int dy = -d; dy <= d; ++dy) {
+        int ny = y_coord + dy;
+
+        int nx1 = x_coord - r;
+        int nx2 = x_coord + r;
+
+        if (ny >= 0 && ny < height) {
+            if (nx1 >= 0 && nx1 < W) {
+                mask[ny * W + nx1] = 255;
+            }
+            if (nx2 >= 0 && nx2 < W) {
+                mask[ny * W + nx2] = 255;
+            }
+        }
+    }
 }
 
 //
@@ -71,46 +107,6 @@ __global__ void HandVisionGPU(unsigned char* vec, unsigned char* mask, int width
 
             } else {
                 mask[y * width + x] =  0;
-            }
-        }
-    }
-
-    __syncthreads()
-
-    unsigned long long x_coord { sum_10 / sum_00 };
-    unsigned long long y_coord { sum_01 / sum_00 };
-
-    int r { 1100 };
-    int d { 1350 };
-
-    for (int dx = -r; dx <= r; ++dx) {
-        int nx = x_coord + dx;
-
-        int ny1 = y_coord - d;
-        int ny2 = y_coord + d;
-
-        if (nx >= 0 && nx < width) {
-            if (ny1 >= 0 && ny1 < height) {
-                mask[ny1 * width + nx] = 255;
-            }
-            if (ny2 >= 0 && ny2 < height) {
-                mask[ny2 * W + nx] = 255;
-            }
-        }
-    }
-
-    for (int dy = -d; dy <= d; ++dy) {
-        int ny = y_coord + dy;
-
-        int nx1 = x_coord - r;
-        int nx2 = x_coord + r;
-
-        if (ny >= 0 && ny < height) {
-            if (nx1 >= 0 && nx1 < W) {
-                mask[ny * W + nx1] = 255;
-            }
-            if (nx2 >= 0 && nx2 < W) {
-                mask[ny * W + nx2] = 255;
             }
         }
     }
