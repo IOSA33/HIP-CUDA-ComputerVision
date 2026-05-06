@@ -16,41 +16,44 @@
 constexpr int g_Width { 3072 };
 constexpr int g_Height { 4096 };
 
-__global__ void DrawRectangle(unsigned long long sum_00, unsigned long long sum_10, unsigned long long sum_01) {
+__global__ void DrawRectangle(unsigned char* mask, int width, int height, unsigned long long sum_00, unsigned long long sum_10, unsigned long long sum_01) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    
+    if (sum_00 == 0) return;
     unsigned long long x_coord { sum_10 / sum_00 };
     unsigned long long y_coord { sum_01 / sum_00 };
 
     int r { 1100 };
     int d { 1350 };
 
-    for (int dx = -r; dx <= r; ++dx) {
-        int nx = x_coord + dx;
-
-        int ny1 = y_coord - d;
-        int ny2 = y_coord + d;
+    if (idx <= 2 * r) {
+        int nx = x_coord - r + idx;
 
         if (nx >= 0 && nx < width) {
+            int ny1 = y_coord - d;
+            int ny2 = y_coord + d;
+            
             if (ny1 >= 0 && ny1 < height) {
                 mask[ny1 * width + nx] = 255;
             }
             if (ny2 >= 0 && ny2 < height) {
-                mask[ny2 * W + nx] = 255;
+                mask[ny2 * width + nx] = 255;
             }
         }
     }
 
-    for (int dy = -d; dy <= d; ++dy) {
-        int ny = y_coord + dy;
-
-        int nx1 = x_coord - r;
-        int nx2 = x_coord + r;
+    if (idx <= 2 * d) {
+        int ny = y_coord - d + idx;
 
         if (ny >= 0 && ny < height) {
-            if (nx1 >= 0 && nx1 < W) {
-                mask[ny * W + nx1] = 255;
+            int nx1 = x_coord - r;
+            int nx2 = x_coord + r;
+
+            if (nx1 >= 0 && nx1 < width) {
+                mask[ny * width + nx1] = 255;
             }
-            if (nx2 >= 0 && nx2 < W) {
-                mask[ny * W + nx2] = 255;
+            if (nx2 >= 0 && nx2 < width) {
+                mask[ny * width + nx2] = 255;
             }
         }
     }
@@ -59,62 +62,80 @@ __global__ void DrawRectangle(unsigned long long sum_00, unsigned long long sum_
 //
 // Doing hand vision work with kernels
 //
-__global__ void HandVisionGPU(unsigned char* vec, unsigned char* mask, int width, int height) {
+__global__ void HandVisionGPU(unsigned char* vec, unsigned char* mask, int width, int height, unsigned long long* sum_00, unsigned long long* sum_10, unsigned long long* sum_01) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int Y_size    = width * height;
 
     // The result may differ from one image to another, color skin
-    // TODO: average skin colour
     unsigned char colR { 143 };
     unsigned char colG { 103 };
     unsigned char colB { 80 };
     unsigned char tolerance { 29 };
 
-    unsigned long long sum_00 { 0 };
-    unsigned long long sum_10 { 0 };
-    unsigned long long sum_01 { 0 };
+    __shared__ unsigned long long s_sum_00;
+    __shared__ unsigned long long s_sum_10;
+    __shared__ unsigned long long s_sum_01;
 
-    for (unsigned long long y { 0 }; y < height; ++y) {
-        for (unsigned long long x { 0 }; x < width; ++x) {
+    if (threadIdx.x == 0) {
+        s_sum_00 = 0;
+        s_sum_10 = 0;
+        s_sum_01 = 0;
+    }
+    __syncthreads();
 
-            // brightness index
-            int Y = vec[y * width + x];
-            // Calculating index
-            int uv_row = y / 2;
-            int uv_col = x / 2;
-            int uv_index = Y_size + (uv_row * width) + (uv_col * 2);
-            // UV for the pixel (i,j)
-            int U   = vec[uv_index];
-            int V   = vec[uv_index + 1];
+    if (idx < Y_size) {
+        int y = idx / width;
+        int x = idx % width;
+        
+        // brightness index
+        int Y = vec[idx];
+        // Calculating index
+        int uv_row = y / 2;
+        int uv_col = x / 2;
+        int uv_index = Y_size + (uv_row * width) + (uv_col * 2);
+        // UV for the pixel (i,j)
+        int U   = vec[uv_index];
+        int V   = vec[uv_index + 1];
 
-            int C = Y - 16;
-            int D = U - 128;
-            int E = V - 128;
+        int C = Y - 16;
+        int D = U - 128;
+        int E = V - 128;
 
-            int R = (298 * C           + 409 * E + 128) >> 8;
-            int G = (298 * C - 100 * D - 208 * E + 128) >> 8;
-            int B = (298 * C + 516 * D           + 128) >> 8;
+        int R = (298 * C           + 409 * E + 128) >> 8;
+        int G = (298 * C - 100 * D - 208 * E + 128) >> 8;
+        int B = (298 * C + 516 * D           + 128) >> 8;
+        
+        if (R < 0)   R = 0; 
+        if (R > 255) R = 255;
+        if (G < 0)   G = 0; 
+        if (G > 255) G = 255;
+        if (B < 0)   B = 0;
+        if (B > 255) B = 255;
+
+        if (abs(R - colR) <= tolerance && abs(G - colG) <= tolerance && abs(B - colB) <= tolerance) {
+            mask[idx] = 255;
             
-            if (R < 0) R = 0; if (R > 255) R = 255;
-            if (G < 0) G = 0; if (G > 255) G = 255;
-            if (B < 0) B = 0; if (B > 255) B = 255;
+            atomicAdd(&s_sum_00, 1);
+            atomicAdd(&s_sum_10, x);
+            atomicAdd(&s_sum_01, y);
 
-            if (std::abs(R - colR) <= tolerance && std::abs(G - colG) <= tolerance && std::abs(B - colB) <= tolerance) {
-                mask[y * width + x] = 255;
-                
-                ++sum_00;
-                sum_10 += x;
-                sum_01 += y;
+        } else {
+            mask[idx] =  0;
+        }
 
-            } else {
-                mask[y * width + x] =  0;
-            }
+        __syncthreads();
+
+        if (threadIdx.x == 0) {
+            atomicAdd(sum_00, s_sum_00);
+            atomicAdd(sum_10, s_sum_10);
+            atomicAdd(sum_01, s_sum_01);
         }
     }
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cout << "usage: ./app.exe <path_to_file>"
+        std::cout << "usage: ./app.exe <path_to_file>";
         return 1;
     }
 
@@ -122,12 +143,14 @@ int main(int argc, char* argv[]) {
     // HIP error type for function checks
     //
     hipError_t err;
-
-    //
-    // Starting timer
-    //
-    const auto start { std::chrono::high_resolution_clock::now() };
     
+    //
+    // Initializing variables for sentroid
+    //
+    unsigned long long host_sum_00 { 0 };
+    unsigned long long host_sum_10 { 0 };
+    unsigned long long host_sum_01 { 0 };
+
     //
     // Opening file and read raw bytes from it
     //
@@ -152,7 +175,7 @@ int main(int argc, char* argv[]) {
     // Copying all data from file to the vector buffer
     //
     std::vector<unsigned char> __buffer(size);
-    if (!input.read(reinterpret_cast<char*>(buffer.data()), size)) {
+    if (!input.read(reinterpret_cast<char*>(__buffer.data()), size)) {
         std::cout << "unable to copy data to vector!" << std::endl;
         return 1;
     }
@@ -176,12 +199,15 @@ int main(int argc, char* argv[]) {
     }
 
     //
-    // Allocating space in global memory
+    // Allocating space in global memory, and also setting with the value
     //
-    std::cout << "Allocating " << g_Width * g_Height * sizeof(unsigned char) / 1.0e6 << " MB of global memory." << std::endl;
     unsigned char* deviceBuffer;
     unsigned char* deviceMask;
-    err = hipMalloc(&deviceBuffer, g_Width * g_Height * sizeof(unsigned char));
+    unsigned long long* device_sum_00;
+    unsigned long long* device_sum_10;
+    unsigned long long* device_sum_01;
+
+    err = hipMalloc(&deviceBuffer, size);
     if ( err != hipSuccess ) {
         std::cerr << "Failed to allocate memory." << std::endl;
         std::cerr << "hipError-code: " << err << std::endl;
@@ -195,19 +221,64 @@ int main(int argc, char* argv[]) {
         std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
         return 1;
     }
+    err = hipMalloc(&device_sum_00, sizeof(unsigned long long));
+    if ( err != hipSuccess ) {
+        std::cerr << "Failed to allocate memory." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+        return 1;
+    }
+    err = hipMalloc(&device_sum_10, sizeof(unsigned long long));
+    if ( err != hipSuccess ) {
+        std::cerr << "Failed to allocate memory." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+        return 1;
+    }
+    err = hipMalloc(&device_sum_01, sizeof(unsigned long long));
+    if ( err != hipSuccess ) {
+        std::cerr << "Failed to allocate memory." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+        return 1;
+    }
+    err = hipMemset(device_sum_00, 0, sizeof(unsigned long long));
+    if ( err != hipSuccess ) {
+        std::cerr << "Failed to SET memory value." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+        return 1;
+    }
+    err = hipMemset(device_sum_10, 0, sizeof(unsigned long long));
+    if ( err != hipSuccess ) {
+        std::cerr << "Failed to SET memory value." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+        return 1;
+    }
+    err = hipMemset(device_sum_01, 0, sizeof(unsigned long long));
+        if ( err != hipSuccess ) {
+        std::cerr << "Failed to SET memory value." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+        return 1;
+    }
 
     //
     // Transfering raw bytes __buffer to device memory, we dont transfer __mask because
     // its empty vector and we only gonna store it there the data
     //
-    std::cout << "Copying " << g_Width * g_Height * sizeof(unsigned char) / 1.0e6 << " MB from host to device." << std::endl;
-    err = hipMemcpy(deviceBuffer, __buffer, g_Width * g_Height * sizeof(unsigned char), hipMemcpyHostToDevice);
+    err = hipMemcpy(deviceBuffer, __buffer.data(), size, hipMemcpyHostToDevice);
     if ( err != hipSuccess ) {
         std::cerr << "Failed to copy memory to device." << std::endl;
         std::cerr << "hipError-code: " << err << std::endl;
         std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
 
         (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
         return 1;
     }
 
@@ -218,10 +289,14 @@ int main(int argc, char* argv[]) {
     const dim3 threadsPerBlock(256);
 
     //
-    // Kernel Call
+    // Starting timer
     //
-    std::cout << "Calling kernel!" << std::endl;
-    HandVisionGPU<<<numberOfBlocks, threadsPerBlock, 0>>>(deviceBuffer, __mask, g_Width, g_Height);
+    const auto start { std::chrono::high_resolution_clock::now() };
+
+    //
+    // Kernel Calls
+    //    
+    HandVisionGPU<<<numberOfBlocks, threadsPerBlock>>>(deviceBuffer, deviceMask, g_Width, g_Height, device_sum_00, device_sum_10, device_sum_01);
     err = hipGetLastError();
     if ( err != hipSuccess ) {
         std::cerr << "Failed to invoke the kernel." << std::endl;
@@ -229,45 +304,131 @@ int main(int argc, char* argv[]) {
         std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
 
         (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
         return 1;
     }
-
     //
-    // Getting the result from the GPU
+    // Getting the result from the GPU to Host
     //
-    std::cout << "Copying " << g_Width * g_Height * sizeof(unsigned char) / 1.0e6 << " MB from device to host." << std::endl;
-    err = hipMemcpy(__mask, deviceBuffer, g_Width * g_Height * sizeof(unsigned char), hipMemcpyDeviceToHost);
+    err = hipMemcpy(&host_sum_00, device_sum_00, sizeof(unsigned long long), hipMemcpyDeviceToHost);
     if (err != hipSuccess) {
         std::cerr << "Failed to copy memory from device." << std::endl;
         std::cerr << "hipError-code: " << err << std::endl;
         std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
 
         (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
+        return 1;
+    }
+    err = hipMemcpy(&host_sum_01, device_sum_01, sizeof(unsigned long long), hipMemcpyDeviceToHost);
+    if (err != hipSuccess) {
+        std::cerr << "Failed to copy memory from device." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+
+        (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
+        return 1;
+    }
+    err = hipMemcpy(&host_sum_10, device_sum_10, sizeof(unsigned long long), hipMemcpyDeviceToHost);
+    if (err != hipSuccess) {
+        std::cerr << "Failed to copy memory from device." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+
+        (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
+        return 1;
+    }
+    err = hipMemcpy(__mask.data(), deviceMask, g_Width * g_Height * sizeof(unsigned char), hipMemcpyDeviceToHost);
+    if (err != hipSuccess) {
+        std::cerr << "Failed to copy memory from device." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+
+        (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
+        return 1;
+    }
+
+    //
+    // Calling DrawRectangle second Kernel
+    //
+    DrawRectangle<<<numberOfBlocks, threadsPerBlock>>>(deviceMask, g_Width, g_Height, host_sum_00, host_sum_10, host_sum_01);
+    err = hipGetLastError();
+    if ( err != hipSuccess ) {
+        std::cerr << "Failed to invoke the kernel." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+
+        (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
+        return 1;
+    }
+
+    const auto end { std::chrono::high_resolution_clock::now() };
+
+    //
+    // Getting result from GPU to Host
+    //
+    err = hipMemcpy(__mask.data(), deviceMask, g_Width * g_Height * sizeof(unsigned char), hipMemcpyDeviceToHost);
+    if (err != hipSuccess) {
+        std::cerr << "Failed to copy memory from device." << std::endl;
+        std::cerr << "hipError-code: " << err << std::endl;
+        std::cerr << "hipError-string: " << hipGetErrorString(err) << std::endl;
+
+        (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
         return 1;
     }
 
     std::ofstream output( "../photos/image_output.raw", std::ios::binary );
     if (!output.is_open()) {
         std::cout << "Cant open a file!\n";
+        (void)hipFree(deviceBuffer);
+        (void)hipFree(deviceMask);
+        (void)hipFree(device_sum_00);
+        (void)hipFree(device_sum_01);
+        (void)hipFree(device_sum_10);
         return 1;
     }
-    output.write(reinterpret_cast<const char*>(mask.data()), mask.size());
+    output.write(reinterpret_cast<const char*>(__mask.data()), __mask.size());
     output.close();
 
     //
     // Doing clean ups
     //
     (void)hipFree(deviceBuffer);
-
-    //
-    // Checking How much time it took to complete
-    //
-    const auto end { std::chrono::high_resolution_clock::now() };
+    (void)hipFree(deviceMask);
+    (void)hipFree(device_sum_00);
+    (void)hipFree(device_sum_01);
+    (void)hipFree(device_sum_10);
 
     //
     // Just for seeing result in jpg format
     //
-    stbi_write_jpg("output.jpg", g_Width, g_Height, 1, mask.data(), 90);
+    stbi_write_jpg("output.jpg", g_Width, g_Height, 1, __mask.data(), 90);
 
     //
     // Printing Benchmark timer result
