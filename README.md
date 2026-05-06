@@ -13,3 +13,13 @@ cmake ..
 ninja
 ./app.exe
 ```
+
+# Benchmark
+
+## __CPU__
+- 2k Image input- 0.034s ~ 33 fps
+- 8k Image input - 0.093s ~ 10 fps
+
+## __GPU__
+- 2k Image input - 0.0018s ~ 550 fps
+- 8k Image input - 0.0042s ~ 240 fps
