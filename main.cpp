@@ -106,6 +106,9 @@ void HandVision(std::vector<unsigned char>& vec, std::vector<unsigned char>& mas
     }
 }
 
+//
+// This is CPU implementation
+//
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         std::cout << "usage: ./app.exe <path>" << std::endl;
@@ -114,8 +117,7 @@ int main(int argc, char* argv[]) {
 
     const auto start { std::chrono::high_resolution_clock::now() };
 
-    // TODO: change later to path
-    std::ifstream input( "../photos/output8k.nv12", std::ios::binary | std::ios::ate );
+    std::ifstream input( argv[1], std::ios::binary | std::ios::ate );
     if (!input.is_open()) {
         std::cout << "Cant open a file!\n";
         return 1;
