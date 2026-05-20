@@ -454,9 +454,10 @@ int main(int argc, char* argv[]) {
     stbi_write_jpg("output.jpg", g_Width, g_Height, 1, __mask.data(), 90);
 
     // Checking if we need the CPU test
-    if (argv[2] == 1) {
+    if (std::stoi(argv[2]) == 1) {
         // Checking the result with CPU implementation
-        double result = HandVision(__buffer, __mask_for_CPU_test);
+        HandVision(__buffer, __mask_for_CPU_test);
+        double result = checkResults(__mask, __mask_for_CPU_test);
         std::cout << result << " %\n";        
     }
 
@@ -568,11 +569,11 @@ void HandVision(std::vector<unsigned char>& vec, std::vector<unsigned char>& mas
 
 double checkResults(const std::vector<unsigned char>& __mask_fromGPU, const std::vector<unsigned char>& __mask_for_CPU_test) {
     // Image size
-    const image_size{ g_Height * g_Width };
+    const size_t image_size{ g_Height * g_Width };
     size_t correct_values { 0 };
 
     // Checking that every pixel is correct
-    for (size_t i = 0; i < __mask_fromGPU.size(), ++i) {
+    for (size_t i = 0; i < __mask_fromGPU.size(); ++i) {
         if (__mask_fromGPU[i] == __mask_for_CPU_test[i]) {
             ++correct_values;
         } else {
