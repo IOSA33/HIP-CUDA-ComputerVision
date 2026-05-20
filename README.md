@@ -17,20 +17,22 @@
 - https://developer.nvidia.com/gpugems/gpugems2/part-v-image-oriented-computing/chapter-40-computer-vision-gpu
 
 # How to Start CPU side
-- Put your image in the "photos" folder
-- Then in the ```main.cpp``` change the path to the image file
+- Put your image (nv12 format) in the "photos" folder
+- You can use "output.nv12" in photos folder, for testing the application
 - After, to run the code write in console
 ```
 mkdir build
 cmake ..
 ninja
-./app.exe 1
+./app.exe <path_to_nv12_file_from_build_folder>
 ```
 # How to Start GPU side
-- Put your image in the "photos" folder
-- Then go to the hip folder, after in the ```main.hip.cpp``` change the path to the file
+- Put your image (nv12 format) in the "photos" folder
+- You can use "output.nv12" in photos folder, for testing the application
 - To run the code write in console, in hip folder
 ```
 hipcc main.hip.cc -o app
-./app.exe 1
+./app.exe <path_to_nv12_file> <test?_value_1_or_0>
+
+
 ```
