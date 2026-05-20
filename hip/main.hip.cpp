@@ -24,41 +24,58 @@ constexpr int g_Width { 3072 };
 constexpr int g_Height { 4096 };
 
 __global__ void DrawRectangle(unsigned char* mask, int width, int height, unsigned long long sum_00, unsigned long long sum_10, unsigned long long sum_01) {
+    // Getting thread index
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     
+    // If we somehow got 0 we cannot continue, returning immediately
     if (sum_00 == 0) return;
+    // Getting average coordinates
     unsigned long long x_coord { sum_10 / sum_00 };
     unsigned long long y_coord { sum_01 / sum_00 };
 
+    // How big is out rectangle going to be
     int r { 1100 };
     int d { 1350 };
 
+    // Dwaring Horizontal Line, 2*r means from -1100 to 1100 length
     if (idx <= 2 * r) {
+        // Compute the current x coordinate for this specific thread
         int nx = x_coord - r + idx;
 
+        // Boundary check
         if (nx >= 0 && nx < width) {
+            // y coordinate for the top horizontal line
             int ny1 = y_coord - d;
+            // y coordinate for the bottom horizontal line
             int ny2 = y_coord + d;
             
+            // If the top line is within image bounds, setting it with white color
             if (ny1 >= 0 && ny1 < height) {
                 mask[ny1 * width + nx] = 255;
             }
+            // If the bottom line is within image bounds, setting it with white color
             if (ny2 >= 0 && ny2 < height) {
                 mask[ny2 * width + nx] = 255;
             }
         }
     }
 
+    // Drawing Vetical Line
     if (idx <= 2 * d) {
+        // Compute the current y coordinate for this specific thread
         int ny = y_coord - d + idx;
 
         if (ny >= 0 && ny < height) {
+            // x coordinate for the top horizontal line
             int nx1 = x_coord - r;
+            // x coordinate for the bottom horizontal line
             int nx2 = x_coord + r;
 
+            // If the top line is within image bounds, setting it with white color
             if (nx1 >= 0 && nx1 < width) {
                 mask[ny * width + nx1] = 255;
             }
+            // If the bottom line is within image bounds, setting it with white color
             if (nx2 >= 0 && nx2 < width) {
                 mask[ny * width + nx2] = 255;
             }
@@ -458,7 +475,7 @@ int main(int argc, char* argv[]) {
         // Checking the result with CPU implementation
         HandVision(__buffer, __mask_for_CPU_test);
         double result = checkResults(__mask, __mask_for_CPU_test);
-        std::cout << result << " %\n";        
+        std::cout << "Result is: " << result * 100 << " %\n";        
     }
 
     //
@@ -474,7 +491,7 @@ int main(int argc, char* argv[]) {
 
 
 
-// CPU implementation
+// CPU implementation, the explanations is in GPU versio, it is exactly the same as GPU version
 void HandVision(std::vector<unsigned char>& vec, std::vector<unsigned char>& mask) {
     int W         = g_Width;
     int H         = g_Height;
